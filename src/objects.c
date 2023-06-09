@@ -1442,6 +1442,29 @@ void launch_new_connection(PgPool *pool, bool evict_if_needed)
 		return;
 	}
 
+	/*
+	 * If a new connection is launched, and the pool is configured to use a different node
+	 * as a reader, try to connect to the original configured writer node in case it is
+	 * back up.
+	*/
+	if (cf_reader_hostname != NULL && !pool->last_connect_failed && pool->db->old_writer != NULL) {
+		char *new_host = NULL;
+
+		if (pool->db->new_writer != NULL) {
+			log_debug("setting pool->db->host to new writer: %s, old value is %s", pool->db->new_writer, pool->db->host);
+			new_host = strdup(pool->db->new_writer);
+		} else {
+			log_debug("setting pool->db->host to old writer: %s, old value is %s", pool->db->old_writer, pool->db->host);
+			new_host = strdup(pool->db->old_writer);
+		}
+		if (new_host == NULL) {
+			log_error("strdup: no mem in launch_new_connection");
+			return;
+		}
+		free(pool->db->host);
+		pool->db->host = new_host;
+	}
+
 	/* if server bounces, don't retry too fast */
 	if (pool->last_connect_failed) {
 		usec_t now = get_cached_time();
@@ -1450,9 +1473,32 @@ void launch_new_connection(PgPool *pool, bool evict_if_needed)
 				  (cf_server_login_retry - (now - pool->last_connect_time)) / USEC);
 			return;
 		}
+
+		if (cf_reader_hostname != NULL) {
+			/*
+			 * First connection where there is no old_writer. We want to
+			 * save the original host for when it comes back up and we
+			 * do not need to discover a new writer.
+			*/
+			if (pool->db->old_writer == NULL) {
+				pool->db->old_writer = strdup(pool->db->host);
+				if (pool->db->old_writer == NULL) {
+					log_error("strdup: no mem in launch_new_connection");
+					return;
+				}
+			}
+			free(pool->db->host);
+			pool->db->host = strdup(cf_reader_hostname);
+			if (pool->db->host == NULL) {
+				log_error("strdup: no mem in launch_new_connection");
+				return;
+			}
+			log_debug("last_connect_failed to configured writer: '%s', using cf_reader_hostname: '%s'", pool->db->old_writer, cf_reader_hostname);
+		}
 	}
 
 	max = pool_server_count(pool);
+	log_debug("using host: '%s' to launch new connection", pool->db->host);
 
 	/*
 	 * Peer pools only have a single pool_size.
@@ -1550,6 +1596,13 @@ force_new:
 	}
 
 	dns_connect(server);
+
+	if (pool->db->new_writer != NULL) {
+		// TODO figure out what to free if anything.
+		//free(pool->db->host);
+		free(pool->db->new_writer);
+		pool->db->new_writer = NULL;
+	}
 }
 
 /* new client connection attempt */

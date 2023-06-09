@@ -466,6 +466,7 @@ struct PgDatabase {
 	int pool_mode;		/* pool mode for this database */
 	int max_db_connections;	/* max server connections between all pools */
 	char *connect_query;	/* startup commands to send to server after connect */
+	char *topology_query;	/* command to get topology to determine promoted writer */
 
 	struct PktBuf *startup_params; /* partial StartupMessage (without user) be sent to server */
 	const char *dbname;	/* server-side name, pointer to inside startup_msg */
@@ -486,6 +487,10 @@ struct PgDatabase {
 	usec_t inactive_time;	/* when auto-database became inactive (to kill it after timeout) */
 	unsigned active_stamp;	/* set if autodb has connections */
 	int connection_count;	/* total connections for this database in all pools */
+
+	/* Fast failovers */
+	char *new_writer;
+	char *old_writer;
 
 	struct AATree user_tree;	/* users that have been queried on this database */
 };
@@ -641,6 +646,7 @@ extern char *cf_pidfile;
 
 extern char *cf_ignore_startup_params;
 
+extern char *cf_reader_hostname;
 extern char *cf_admin_users;
 extern char *cf_stats_users;
 extern int cf_stats_period;

@@ -61,12 +61,20 @@ static char *cstr_unquote_value(char *p)
 	while (1) {
 		if (!*p)
 			return NULL;
+		/* Support escaping single quotes */
+		if (p[0] == '\\') {
+			if (p[1] == '\'') {
+				p++;
+				goto increment;
+			}
+		}
 		if (p[0] == '\'') {
 			if (p[1] == '\'')
 				p++;
 			else
 				break;
 		}
+increment:
 		*s++ = *p++;
 	}
 	/* terminate actual value */
@@ -286,6 +294,7 @@ bool parse_database(void *base, const char *name, const char *connstr)
 	char *datestyle = NULL;
 	char *timezone = NULL;
 	char *connect_query = NULL;
+	char *topology_query = NULL;
 	char *appname = NULL;
 
 	cv.value_p = &pool_mode;
@@ -363,6 +372,12 @@ bool parse_database(void *base, const char *name, const char *connstr)
 				log_error("out of memory");
 				goto fail;
 			}
+		} else if (strcmp("topology_query", key) == 0) {
+			topology_query = strdup(val);
+			if (!topology_query) {
+				log_error("out of memory");
+				goto fail;
+			}
 		} else if (strcmp("application_name", key) == 0) {
 			appname = val;
 		} else {
@@ -398,7 +413,7 @@ bool parse_database(void *base, const char *name, const char *connstr)
 			changed = true;
 		} else if (!username && db->forced_user) {
 			changed = true;
-		} else if (!strings_equal(connect_query, db->connect_query)) {
+		} else if (!strings_equal(topology_query, db->topology_query)) {
 			changed = true;
 		} else if (!strings_equal(db->auth_dbname, auth_dbname)) {
 			changed = true;
@@ -408,6 +423,10 @@ bool parse_database(void *base, const char *name, const char *connstr)
 	}
 
 	free(db->host);
+	free(db->old_writer);
+	free(db->new_writer);
+	db->old_writer = NULL;
+	db->new_writer = NULL;
 	db->host = host;
 	db->port = port;
 	db->pool_size = pool_size;
@@ -417,6 +436,8 @@ bool parse_database(void *base, const char *name, const char *connstr)
 	db->max_db_connections = max_db_connections;
 	free(db->connect_query);
 	db->connect_query = connect_query;
+	free(db->topology_query);
+	db->topology_query = topology_query;
 
 	if (!set_auth_dbname(db, auth_dbname))
 		goto fail;

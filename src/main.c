@@ -162,6 +162,7 @@ char *cf_pidfile;
 char *cf_jobname;
 
 char *cf_admin_users;
+char *cf_reader_hostname;
 char *cf_stats_users;
 int cf_stats_period;
 int cf_log_stats;
@@ -230,6 +231,7 @@ const struct CfLookup sslmode_map[] = {
  */
 static const struct CfKey bouncer_params [] = {
 CF_ABS("admin_users", CF_STR, cf_admin_users, 0, ""),
+CF_ABS("reader_hostname", CF_STR, cf_reader_hostname, 0, NULL),
 CF_ABS("application_name_add_host", CF_INT, cf_application_name_add_host, 0, "0"),
 CF_ABS("auth_dbname", CF_AUTHDB, cf_auth_dbname, 0, NULL),
 CF_ABS("auth_file", CF_STR, cf_auth_file, 0, NULL),
@@ -422,6 +424,9 @@ void load_config(void)
 
 	set_dbs_dead(true);
 	set_peers_dead(true);
+
+	free(cf_reader_hostname);
+	cf_reader_hostname = NULL;
 
 	/* actual loading */
 	ok = cf_load_file(&main_config, cf_config_file);
@@ -875,6 +880,7 @@ static void cleanup(void)
 	xfree(&cf_ignore_startup_params);
 	xfree(&cf_autodb_connstr);
 	xfree(&cf_jobname);
+	xfree(&cf_reader_hostname);
 	xfree(&cf_admin_users);
 	xfree(&cf_stats_users);
 	xfree(&cf_client_tls_protocols);

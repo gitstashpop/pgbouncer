@@ -22,6 +22,43 @@
 
 #include "bouncer.h"
 
+/*
+* Returns the query data from the server. This must be freed.
+*/
+static char *query_data(PktHdr *pkt)
+{
+	uint16_t columns;
+	uint32_t length;
+	const char *data;
+	char *output;
+
+	if (!mbuf_get_uint16be(&pkt->data, &columns))
+	{
+		log_error("could not get packet column count");
+		return NULL;
+	}
+	if (!mbuf_get_uint32be(&pkt->data, &length))
+	{
+		log_error("could not get packet length");
+		return NULL;
+	}
+	if (!mbuf_get_chars(&pkt->data, length, &data))
+	{
+		log_error("could not get packet data");
+		return NULL;
+	}
+
+	output = strndup(data, length);
+	if (output == NULL) {
+		log_error("strdup: no mem in query_data");
+		return NULL;
+	}
+
+	log_debug("data from DataRow: %s, length: %d, strlen: %lu", output, length, strlen(output));
+
+	return output;
+}
+
 static bool load_parameter(PgSocket *server, PktHdr *pkt, bool startup)
 {
 	const char *key, *val;
@@ -92,6 +129,7 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 	SBuf *sbuf = &server->sbuf;
 	bool res = false;
 	const uint8_t *ckey;
+	char *data = NULL;
 
 	if (incomplete_pkt(pkt)) {
 		disconnect_server(server, true, "partial pkt in login phase");
@@ -102,6 +140,7 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 	if (server->exec_on_connect) {
 		switch (pkt->type) {
 		case 'Z':
+		case 'D':
 		case 'S':	/* handle them below */
 			break;
 
@@ -120,6 +159,22 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 		disconnect_server(server, true, "unknown pkt from server");
 		break;
 
+	case 'D':		/* DataRow */
+		if (server->pool->db->old_writer != NULL) {
+			data = query_data(pkt);
+
+			if (strcmp(server->pool->db->host, data) == 0) {
+				free(data);
+				log_debug("startup: already connected to new writer, nothing to do");
+			} else {
+				server->pool->db->new_writer = data;
+				log_debug("startup: set new writer to: %s because old host is %s", server->pool->db->new_writer, server->pool->db->host);
+			}
+		}
+
+		sbuf_prepare_skip(sbuf, pkt->len);
+		return true;
+		break;
 	case 'E':		/* ErrorResponse */
 		if (!server->pool->welcome_msg_ready)
 			kill_pool_logins_server_error(server->pool, pkt);
@@ -145,6 +200,13 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 		if (server->exec_on_connect) {
 			server->exec_on_connect = false;
 			/* deliberately ignore transaction status */
+		} else if (server->pool->db->topology_query && cf_reader_hostname != NULL && server->pool->db->old_writer != NULL) {
+			server->exec_on_connect = true;
+			slog_debug(server, "server connect ok, sending topology query: %s", server->pool->db->topology_query);
+			SEND_generic(res, server, 'Q', "s", server->pool->db->topology_query);
+			if (!res)
+				disconnect_server(server, false, "exec_on_connect query failed");
+			break;
 		} else if (server->pool->db->connect_query) {
 			server->exec_on_connect = true;
 			slog_debug(server, "server connect ok, send exec_on_connect");
@@ -155,8 +217,13 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 		}
 
 		/* login ok */
-		slog_debug(server, "server login ok, start accepting queries");
 		server->ready = true;
+		if (server->pool->db->new_writer != NULL) {
+			log_info("disconnecting from server because not connected to the promoted writer");
+			disconnect_server(server, true, "reader, so disconnecting and connecting to promoted writer");
+			break;
+		}
+		slog_debug(server, "server login ok, start accepting queries");
 
 		/* got all params */
 		finish_welcome_msg(server);
