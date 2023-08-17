@@ -854,6 +854,10 @@ bool life_over(PgSocket *server)
 	usec_t age = now - server->connect_time;
 	usec_t last_kill = now - pool->last_lifetime_disconnect;
 
+	// never close the pools when using fast switchovers
+	if (fast_switchover)
+		return false;
+
 	if (age < cf_server_lifetime)
 		return false;
 
@@ -1603,6 +1607,21 @@ bool finish_client_login(PgSocket *client)
 
 	switch (client->state) {
 	case CL_LOGIN:
+		if (client->pool->db->admin) {
+			log_debug("finish_client_login: admin_db: nothing to do");
+		} else if (!fast_switchover) {
+			log_debug("finish_client_login: not using fast switchovers");
+		} else if (!client->pool->db->topology_query) {
+			log_debug("finish_client_login: no topology query, so not using fast switchover");
+		} else if (global_writer) {
+			log_debug("finish_client_login: global writer is set, so let's use the cached value: %s", global_writer->db->name);
+			if (!set_pool(client, global_writer->db->name, client->login_user->name, client->login_user->passwd, true)) {
+				log_error("could not set pool to: %s", global_writer->db->name);
+				return false;
+			}
+		} else {
+			log_debug("finish_client_login: done...activating client");
+		}
 		change_client_state(client, CL_ACTIVE);
 	case CL_ACTIVE:
 		break;

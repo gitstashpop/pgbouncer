@@ -22,6 +22,44 @@
 
 #include "bouncer.h"
 
+/*
+* Returns the query data from the server. This must be freed.
+*/
+static char *query_data(PktHdr *pkt)
+{
+	uint16_t columns;
+	uint32_t length;
+	const char *data;
+	char *output;
+
+	if (!mbuf_get_uint16be(&pkt->data, &columns))
+	{
+		log_error("could not get packet column count");
+		return NULL;
+	}
+	if (!mbuf_get_uint32be(&pkt->data, &length))
+	{
+		log_error("could not get packet length");
+		return NULL;
+	}
+	if (!mbuf_get_chars(&pkt->data, length, &data))
+	{
+		log_error("could not get packet data");
+		return NULL;
+	}
+
+	output = strndup(data, length);
+	if (output == NULL) {
+		log_error("strdup: no mem in query_data");
+		return NULL;
+	}
+
+	log_debug("data from DataRow: %s, length: %d, strlen: %lu", output, length, strlen(output));
+
+	return output;
+}
+
+
 static bool load_parameter(PgSocket *server, PktHdr *pkt, bool startup)
 {
 	const char *key, *val;
@@ -92,6 +130,8 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 	SBuf *sbuf = &server->sbuf;
 	bool res = false;
 	const uint8_t *ckey;
+	char *data = NULL;
+	char *hostname = NULL;
 
 	if (incomplete_pkt(pkt)) {
 		disconnect_server(server, true, "partial pkt in login phase");
@@ -102,11 +142,15 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 	if (server->exec_on_connect) {
 		switch (pkt->type) {
 		case 'Z':
+		case 'D':
 		case 'S':	/* handle them below */
 			break;
 
 		case 'E':	/* log & ignore errors */
 			log_server_error("S: error while executing exec_on_query", pkt);
+			// require topology table to exist in the cluster if using
+			if (fast_switchover)
+				fatal("does the topology table exist?");
 			/* fallthrough */
 		default:	/* ignore rest */
 			sbuf_prepare_skip(sbuf, pkt->len);
@@ -120,6 +164,35 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 		disconnect_server(server, true, "unknown pkt from server");
 		break;
 
+	case 'D':       /* DataRow */
+		if (fast_switchover && server->pool->db->topology_query && server->pool->initial_writer_endpoint) {
+			data = query_data(pkt);
+			log_debug("got initial data: %s", data);
+
+			hostname = strdup(data);
+			if (hostname == NULL) {
+				log_error("strdup: no mem for hostname");
+				free(data);
+				return NULL;
+			}
+
+			if (!strtok(data, ".")) {
+				log_error("could not parse hostname from: %s", data);
+			} else {
+				PgPool *new_pool = new_pool_from_db(server->pool->db, data, hostname);
+				if (new_pool) {
+					new_pool->db->topology_query = strdup(server->pool->db->topology_query);
+					launch_new_connection(new_pool, true);
+				}
+			}
+
+			free(data);
+			free(hostname);
+		}
+
+		sbuf_prepare_skip(sbuf, pkt->len);
+		return true;
+		break;
 	case 'E':		/* ErrorResponse */
 		if (!server->pool->welcome_msg_ready)
 			kill_pool_logins_server_error(server->pool, pkt);
@@ -152,7 +225,16 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 			if (!res)
 				disconnect_server(server, false, "exec_on_connect query failed");
 			break;
+		} else if (fast_switchover && server->pool->db->topology_query && server->pool->initial_writer_endpoint) {
+			server->exec_on_connect = true;
+			slog_debug(server, "server connect ok, send topology_query: %s", server->pool->db->topology_query);
+			SEND_generic(res, server, 'Q', "s", server->pool->db->topology_query);
+			if (!res)
+				disconnect_server(server, false, "exec_on_connect query failed");
+			break;
 		}
+
+		server->pool->initial_writer_endpoint = false;
 
 		/* login ok */
 		slog_debug(server, "server login ok, start accepting queries");
@@ -358,6 +440,18 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 	/* data packets, there will be more coming */
 	case 'd':		/* CopyData(F/B) */
 	case 'D':		/* DataRow */
+		if (fast_switchover && checking_for_new_writer && server->state != SV_TESTED) {
+			char *data = query_data(pkt);
+			if (strcmp(data, "f") == 0) {
+				log_debug("handle_server_work: connected to writer (pg_is_in_recovery is '%s'): db_name %s", data, server->pool->db->name);
+				global_writer = server->pool;
+				log_debug("setting global writer to: %s", global_writer->db->name);
+			} else {
+				log_debug("handle_server_work: connected to reader (pg_is_in_recovery is '%s'). db_name: %s, Must keep polling until next server.", data, server->pool->db->name);
+			}
+			checking_for_new_writer = false;
+			free(data);
+		}
 	case 't':		/* ParameterDescription */
 	case 'T':		/* RowDescription */
 		break;
@@ -418,7 +512,7 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 			}
 		}
 	} else {
-		if (server->state != SV_TESTED)
+		if (server->state != SV_TESTED && !server->pool->db->topology_query)
 			slog_warning(server,
 				     "got packet '%c' from server when not linked",
 				     pkt_desc(pkt));
@@ -552,8 +646,20 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 	case SBUF_EV_RECV_FAILED:
 		if (server->state == SV_ACTIVE_CANCEL)
 			disconnect_server(server, false, "successfully sent cancel request");
-		else
+		else {
+			if (global_writer) {
+				global_writer->last_failed_time = get_cached_time();
+				global_writer->last_connect_failed = true;
+				global_writer = NULL;
+			}
+			// mark main pool as failed as well (the writer)
+			if (fast_switchover) {
+				pool->last_failed_time = get_cached_time();
+				pool->last_connect_failed = true;
+			}
+			checking_for_new_writer = false;
 			disconnect_server(server, false, "server conn crashed?");
+		}
 		break;
 	case SBUF_EV_SEND_FAILED:
 		disconnect_client(server->link, false, "unexpected eof");
@@ -593,6 +699,16 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 		break;
 	case SBUF_EV_CONNECT_FAILED:
 		Assert(server->state == SV_LOGIN);
+		if (fast_switchover) {
+			pool->last_failed_time = get_cached_time();
+
+			if (global_writer) {
+				global_writer->last_failed_time = get_cached_time();
+				global_writer->last_connect_failed = true;
+				global_writer = NULL;
+			}
+			checking_for_new_writer = false;
+		}
 		disconnect_server(server, false, "connect failed");
 		break;
 	case SBUF_EV_CONNECT_OK:

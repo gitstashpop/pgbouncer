@@ -374,10 +374,14 @@ struct PgPool {
 
 	/* if last connect to server failed, there should be delay before next */
 	usec_t last_connect_time;
+	usec_t last_poll_time;
+	usec_t last_failed_time; // last time the connection failed
 	bool last_connect_failed:1;
 	bool last_login_failed:1;
 
 	bool welcome_msg_ready:1;
+	bool recently_checked:1; // should be set once checking starts. If all pools have this set, they need to be unset so we can loop again.
+	bool initial_writer_endpoint:1; // used to indicate a configured writer when starting PgBouncer. Used for getting the topology of the cluster associated with the writer.
 
 	uint16_t rrcounter;		/* round-robin counter */
 };
@@ -466,6 +470,7 @@ struct PgDatabase {
 	int pool_mode;		/* pool mode for this database */
 	int max_db_connections;	/* max server connections between all pools */
 	char *connect_query;	/* startup commands to send to server after connect */
+	char *topology_query;	/* command to get topology to determine promoted writer. Also used to indicate whether to use fast_switchovers on a specific node */
 
 	struct PktBuf *startup_params; /* partial StartupMessage (without user) be sent to server */
 	const char *dbname;	/* server-side name, pointer to inside startup_msg */
@@ -598,6 +603,7 @@ extern int cf_peer_id;
 extern int cf_pool_mode;
 extern int cf_max_client_conn;
 extern int cf_default_pool_size;
+extern usec_t cf_polling_frequency;
 extern int cf_min_pool_size;
 extern int cf_res_pool_size;
 extern usec_t cf_res_pool_timeout;
@@ -615,6 +621,7 @@ extern int cf_server_reset_query_always;
 extern char * cf_server_check_query;
 extern usec_t cf_server_check_delay;
 extern int cf_server_fast_close;
+extern usec_t cf_server_failed_delay;
 extern usec_t cf_server_connect_timeout;
 extern usec_t cf_server_login_retry;
 extern usec_t cf_query_timeout;

@@ -65,6 +65,30 @@ PktBuf *pktbuf_dynamic(int start_len)
 	return buf;
 }
 
+PktBuf *pktbuf_copy(PktBuf *orig)
+{
+	PktBuf *buf = zmalloc(sizeof(PktBuf));
+	if (!buf)
+		return NULL;
+
+	buf->ev = zmalloc(sizeof(*buf->ev));
+	if (!buf->ev) {
+		pktbuf_free(buf);
+		return NULL;
+	}
+	buf->buf = zmalloc(sizeof(*buf->buf));
+	if (!buf->buf) {
+		pktbuf_free(buf);
+		return NULL;
+	}
+
+	memcpy(buf, orig, sizeof(PktBuf));
+	memcpy(buf->buf, orig->buf, sizeof(*buf->buf));
+	memcpy(buf->ev, orig->ev, sizeof(*buf->ev));
+
+	return buf;
+}
+
 void pktbuf_reset(struct PktBuf *pkt)
 {
 	pkt->failed = false;
