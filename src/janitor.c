@@ -259,8 +259,9 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 			need_check = false;
 	}
 
-	if (need_check) {
-		if (fast_switchover && !global_writer && pool->db->topology_query) {
+	if (fast_switchover) {
+		if (!global_writer && pool->db->topology_query) {
+			log_debug("in pg_is_in_recovery block, global_writer: %p topology_query: %p", global_writer, pool->db->topology_query);
 			checking_for_new_writer= true;
 			q = strdup("select pg_is_in_recovery()");
 			if (q == NULL) {
@@ -272,20 +273,22 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 			if (!res)
 				disconnect_server(server, false, "pg_is_in_recovery() query failed");
 			free(q);
+			return;
 		} else {
-			reset_recently_checked();
-
-			slog_debug(server, "P: checking: %s (done polling)", q);
-			change_server_state(server, SV_TESTED);
-			SEND_generic(res, server, 'Q', "s", q);
-			if (!res)
-				disconnect_server(server, false, "test query failed");
-
 			/* reactivate paused clients that never finished logging in */
 			if (client->state == CL_WAITING_LOGIN || client->state == CL_WAITING) {
+				change_server_state(server, SV_ACTIVE);
 				activate_client(client);
 			}
 		}
+	}
+
+	if (need_check) {
+		slog_debug(server, "P: checking: %s (done polling)", q);
+		change_server_state(server, SV_TESTED);
+		SEND_generic(res, server, 'Q', "s", q);
+		if (!res)
+			disconnect_server(server, false, "test query failed");
 	} else {
 		/* make immediately available */
 		release_server(server);
