@@ -383,6 +383,7 @@ struct PgPool {
 	bool recently_checked:1; // should be set once checking starts. If all pools have this set, they need to be unset so we can loop again.
 	bool initial_writer_endpoint:1; // used to indicate a configured writer when starting PgBouncer. Used for getting the topology of the cluster associated with the writer.
 
+	uint16_t num_nodes;
 	uint16_t rrcounter;		/* round-robin counter */
 };
 

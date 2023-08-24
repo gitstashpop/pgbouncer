@@ -333,7 +333,8 @@ static void per_loop_activate(PgPool *pool)
 			/* not enough connections */
 			log_debug("launch_new_connection because not enough connections. number pools: %d, for: %s", statlist_count(&pool_list), pool->db->name);
 
-			if (fast_switchover && (!global_writer || pool->last_connect_failed)) {
+			if (fast_switchover && !pool->initial_writer_endpoint &&
+			 	(!global_writer || pool->last_connect_failed)) {
 				log_debug("launch_new_connection loop: going to try to use pool cache since this pool was a writer: last_connect_failed (%d)",
 						pool->last_connect_failed);
 				launch_recheck(pool, client);

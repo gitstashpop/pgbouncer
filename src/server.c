@@ -183,6 +183,7 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 				if (new_pool) {
 					new_pool->db->topology_query = strdup(server->pool->db->topology_query);
 					launch_new_connection(new_pool, true);
+					server->pool->num_nodes++;
 				}
 			}
 
@@ -234,6 +235,9 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 			break;
 		}
 
+		if (server->pool->initial_writer_endpoint && server->pool->num_nodes < 3) {
+			fatal("topology_query did not find at least 3 nodes to use DB: '%s'. Is the topology table populated with entries?", server->pool->db->name);
+		}
 		server->pool->initial_writer_endpoint = false;
 
 		/* login ok */
