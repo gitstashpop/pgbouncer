@@ -460,7 +460,7 @@ static void loop_maint(bool initialize)
 			pool->initial_writer_endpoint = true;
 			log_debug("create initial pool during startup for: %s", pool->db->name);
 		} else {
-			if (fast_switchover && pool->last_connect_failed) {
+			if (fast_switchover && pool->last_connect_failed && global_writer) {
 				if (now - pool->last_failed_time > cf_server_failed_delay) {
 					log_debug("last connect failed: %s, so launching new connection in per_loop_maint", pool->db->name);
 					launch_new_connection(pool, true);

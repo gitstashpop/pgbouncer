@@ -706,11 +706,6 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 		if (fast_switchover) {
 			pool->last_failed_time = get_cached_time();
 
-			if (global_writer) {
-				global_writer->last_failed_time = get_cached_time();
-				global_writer->last_connect_failed = true;
-				global_writer = NULL;
-			}
 			checking_for_new_writer = false;
 		}
 		disconnect_server(server, false, "connect failed");
