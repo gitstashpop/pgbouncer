@@ -67,24 +67,31 @@ PktBuf *pktbuf_dynamic(int start_len)
 
 PktBuf *pktbuf_copy(PktBuf *orig)
 {
-	PktBuf *buf = zmalloc(sizeof(PktBuf));
+	PktBuf *buf = zmalloc(sizeof(*orig));
 	if (!buf)
 		return NULL;
 
-	buf->ev = zmalloc(sizeof(*buf->ev));
+	buf->ev = zmalloc(sizeof(*orig->ev));
 	if (!buf->ev) {
 		pktbuf_free(buf);
 		return NULL;
 	}
-	buf->buf = zmalloc(sizeof(*buf->buf));
+	buf->buf = zmalloc(orig->buf_len);
 	if (!buf->buf) {
 		pktbuf_free(buf);
 		return NULL;
 	}
 
-	memcpy(buf, orig, sizeof(PktBuf));
-	memcpy(buf->buf, orig->buf, sizeof(*buf->buf));
-	memcpy(buf->ev, orig->ev, sizeof(*buf->ev));
+	memcpy(buf->buf, orig->buf, orig->buf_len);
+	memcpy(buf->ev, orig->ev, sizeof(*orig->ev));
+
+	buf->buf_len = orig->buf_len;
+	buf->write_pos = orig->write_pos;
+	buf->pktlen_pos = orig->pktlen_pos;
+	buf->send_pos = orig->send_pos;
+	buf->failed = orig->failed;
+	buf->sending = orig->sending;
+	buf->fixed_buf = orig->fixed_buf;
 
 	return buf;
 }

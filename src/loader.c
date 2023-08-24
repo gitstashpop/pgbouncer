@@ -273,9 +273,11 @@ PgPool *new_pool_from_db(PgDatabase *db, char *dbname, char *hostname)
 	if (!new_db)
 		goto oom;
 
-	new_db->startup_params = pktbuf_copy(db->startup_params);
-	if (new_db->startup_params == NULL)
-		goto oom;
+	if (db->startup_params) {
+		new_db->startup_params = pktbuf_copy(db->startup_params);
+		if (new_db->startup_params == NULL)
+			goto oom;
+	}
 
 	/* tag the db as alive */
 	new_db->db_dead = false;
