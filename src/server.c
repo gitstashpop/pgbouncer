@@ -181,6 +181,8 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 			} else {
 				PgPool *new_pool = new_pool_from_db(server->pool->db, data, hostname);
 				if (new_pool) {
+					new_pool->parent_pool = server->pool;
+					new_pool->parent_pool->global_writer = server->pool;
 					new_pool->db->topology_query = strdup(server->pool->db->topology_query);
 					launch_new_connection(new_pool, true);
 					server->pool->num_nodes++;
@@ -235,7 +237,7 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 			break;
 		}
 
-		if (server->pool->initial_writer_endpoint && server->pool->num_nodes < 3) {
+		if (server->pool->db->topology_query && server->pool->initial_writer_endpoint && server->pool->num_nodes < 3) {
 			fatal("topology_query did not find at least 3 nodes to use DB: '%s'. Is the topology table populated with entries?", server->pool->db->name);
 		}
 		server->pool->initial_writer_endpoint = false;
@@ -448,8 +450,11 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 			char *data = query_data(pkt);
 			if (strcmp(data, "f") == 0) {
 				log_debug("handle_server_work: connected to writer (pg_is_in_recovery is '%s'): db_name %s", data, server->pool->db->name);
-				global_writer = server->pool;
-				log_debug("setting global writer to: %s", global_writer->db->name);
+
+				if (!server->pool->parent_pool) {
+					server->pool->parent_pool = server->pool;
+				}
+				server->pool->parent_pool->global_writer = server->pool;
 			} else {
 				log_debug("handle_server_work: connected to reader (pg_is_in_recovery is '%s'). db_name: %s, Must keep polling until next server.", data, server->pool->db->name);
 			}
@@ -636,6 +641,7 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 	bool res = false;
 	PgSocket *server = container_of(sbuf, PgSocket, sbuf);
 	PgPool *pool = server->pool;
+	PgPool *global_writer = get_global_writer(pool);
 	PktHdr pkt;
 	char infobuf[96];
 
@@ -651,11 +657,9 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 		if (server->state == SV_ACTIVE_CANCEL)
 			disconnect_server(server, false, "successfully sent cancel request");
 		else {
-			if (global_writer) {
-				global_writer->last_failed_time = get_cached_time();
-				global_writer->last_connect_failed = true;
-				global_writer = NULL;
-			}
+			if (global_writer)
+				clear_global_writer(pool);
+
 			// mark main pool as failed as well (the writer)
 			if (fast_switchover) {
 				pool->last_failed_time = get_cached_time();

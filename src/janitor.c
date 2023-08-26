@@ -24,7 +24,6 @@
 
 #include <usual/slab.h>
 
-struct PgPool *global_writer = NULL;
 bool fast_switchover = false;
 bool checking_for_new_writer = false;
 
@@ -174,8 +173,9 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 	usec_t polling_freq_in_ms = cf_polling_frequency / 1000;
 	usec_t last_poll_time;
 	usec_t difference_in_ms;
+	PgPool *global_writer = get_global_writer(pool);
 
-	log_debug("launch_recheck: for db: %s", pool->db->name);
+	log_debug("launch_recheck: for db: %s, global_writer? %s", pool->db->name, global_writer ? global_writer->db->name : "no global_writer");
 
 	if (checking_for_new_writer) {
 		log_debug("launch_recheck: checking_for_new_writer is true so a node is being checked if it is a writer already, skipping");
@@ -195,8 +195,10 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 
 		statlist_for_each(item, &pool_list) {
 			next_pool = container_of(item, PgPool, head);
-			if (next_pool->db->admin)
+
+			if (!next_pool->parent_pool) {
 				continue;
+			}
 
 			if (next_pool->last_connect_failed)
 				continue;
@@ -260,8 +262,8 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 	}
 
 	if (need_check) {
-		if (fast_switchover && !global_writer && pool->db->topology_query) {
-			checking_for_new_writer= true;
+		if (fast_switchover && pool->db->topology_query && !global_writer) {
+			checking_for_new_writer = true;
 			q = strdup("select pg_is_in_recovery()");
 			if (q == NULL) {
 				log_error("strdup: no mem for pg_is_in_recovery()");
@@ -333,8 +335,8 @@ static void per_loop_activate(PgPool *pool)
 			/* not enough connections */
 			log_debug("launch_new_connection because not enough connections. number pools: %d, for: %s", statlist_count(&pool_list), pool->db->name);
 
-			if (fast_switchover && !pool->initial_writer_endpoint &&
-			 	(!global_writer || pool->last_connect_failed)) {
+			if (fast_switchover && pool->db->topology_query &&
+			 	(!get_global_writer(pool) || pool->last_connect_failed)) {
 				log_debug("launch_new_connection loop: going to try to use pool cache since this pool was a writer: last_connect_failed (%d)",
 						pool->last_connect_failed);
 				launch_recheck(pool, client);
@@ -457,10 +459,13 @@ static void loop_maint(bool initialize)
 			continue;
 
 		if (initialize) {
+			if (!pool->db->topology_query)
+				continue;
+
 			pool->initial_writer_endpoint = true;
 			log_debug("create initial pool during startup for: %s", pool->db->name);
 		} else {
-			if (fast_switchover && pool->last_connect_failed && global_writer) {
+			if (fast_switchover && pool->last_connect_failed && get_global_writer(pool)) {
 				if (now - pool->last_failed_time > cf_server_failed_delay) {
 					log_debug("last connect failed: %s, so launching new connection in per_loop_maint", pool->db->name);
 					launch_new_connection(pool, true);

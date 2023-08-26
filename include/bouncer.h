@@ -385,6 +385,9 @@ struct PgPool {
 
 	uint16_t num_nodes;
 	uint16_t rrcounter;		/* round-robin counter */
+
+	PgPool *global_writer;	/* global_writer pool for this pool */;
+	PgPool *parent_pool;	/* the parent pool for setting the global writer */
 };
 
 /*

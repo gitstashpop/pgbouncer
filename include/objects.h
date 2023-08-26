@@ -32,7 +32,6 @@ extern struct Slab *peer_pool_cache;
 extern struct Slab *pool_cache;
 extern struct Slab *user_cache;
 extern struct Slab *iobuf_cache;
-extern struct PgPool *global_writer;
 extern bool fast_switchover;
 extern bool checking_for_new_writer; // this is linked with server and client so we can communicate when polling is truly done. Used to only allow checking for one node a time.
 

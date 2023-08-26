@@ -1593,6 +1593,8 @@ PgSocket *accept_client(int sock, bool is_unix)
 /* client managed to authenticate, send welcome msg and accept queries */
 bool finish_client_login(PgSocket *client)
 {
+	PgPool *global_writer = get_global_writer(client->pool);
+
 	if (client->db->fake) {
 		if (cf_log_connections)
 			slog_info(client, "login failed: db=%s user=%s", client->db->name, client->login_user->name);
