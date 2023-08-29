@@ -643,14 +643,20 @@ PgPool *get_pool(PgDatabase *db, PgUser *user)
 {
 	struct List *item;
 	PgPool *pool;
+	PgPool *global_writer = NULL;
 
 	if (!db || !user)
 		return NULL;
 
 	list_for_each(item, &user->pool_list) {
 		pool = container_of(item, PgPool, map_head);
-		if (pool->db == db)
+		if (pool->db == db) {
+			global_writer = get_global_writer(pool);
+			if (global_writer)
+				return global_writer;
+
 			return pool;
+		}
 	}
 
 	return new_pool(db, user);
@@ -1617,7 +1623,7 @@ bool finish_client_login(PgSocket *client)
 			log_debug("finish_client_login: no topology query, so not using fast switchover");
 		} else if (global_writer) {
 			log_debug("finish_client_login: global writer is set, so let's use the cached value: %s", global_writer->db->name);
-			if (!set_pool(client, global_writer->db->name, client->login_user->name, client->login_user->passwd, true)) {
+			if (client->pool != global_writer && !set_pool(client, global_writer->db->name, client->login_user->name, client->login_user->passwd, true)) {
 				log_error("could not set pool to: %s", global_writer->db->name);
 				return false;
 			}

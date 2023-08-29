@@ -130,6 +130,9 @@ void resume_all(void)
 
 static bool update_client_pool(PgSocket *client, PgPool *new_pool)
 {
+	if (client->pool == new_pool)
+		return true;
+
 	char *username = client->login_user->name;
 	char *passwd = client->login_user->passwd;
 	if (!set_pool(client, new_pool->db->name, username, passwd, true)) {
@@ -196,7 +199,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 		statlist_for_each(item, &pool_list) {
 			next_pool = container_of(item, PgPool, head);
 
-			if (!next_pool->parent_pool) {
+			if (!next_pool->parent_pool || next_pool->parent_pool != pool) {
 				continue;
 			}
 
