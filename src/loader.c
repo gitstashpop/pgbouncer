@@ -263,6 +263,7 @@ fail:
 
 PgPool *new_pool_from_db(PgDatabase *db, char *dbname, char *hostname)
 {
+	PgPool *pool;
 	PgDatabase *new_db = find_database(dbname);
 	if (new_db) {
 		log_debug("db already exists, so won't create db from db: %s", dbname);
@@ -318,7 +319,7 @@ PgPool *new_pool_from_db(PgDatabase *db, char *dbname, char *hostname)
 	}
 
 	log_debug("creating pool for %s", new_db->name);
-	PgPool *pool = get_pool(new_db, new_db->forced_user);
+	pool = get_pool(new_db, new_db->forced_user);
 	if (!pool) {
 		fatal("pool could not be created for %s", new_db->name);
 		goto oom;

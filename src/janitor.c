@@ -130,11 +130,14 @@ void resume_all(void)
 
 static bool update_client_pool(PgSocket *client, PgPool *new_pool)
 {
+	char *username = NULL;
+	char *passwd = NULL;
+
 	if (client->pool == new_pool)
 		return true;
 
-	char *username = client->login_user->name;
-	char *passwd = client->login_user->passwd;
+	username = client->login_user->name;
+	passwd = client->login_user->passwd;
 	if (!set_pool(client, new_pool->db->name, username, passwd, true)) {
 		log_error("could not set pool to: %s", new_pool->db->name);
 		return false;
@@ -143,7 +146,7 @@ static bool update_client_pool(PgSocket *client, PgPool *new_pool)
 	return true;
 }
 
-static void reset_recently_checked()
+static void reset_recently_checked(void)
 {
 	struct List *item;
 	PgPool *pool;
@@ -176,6 +179,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 	usec_t polling_freq_in_ms = cf_polling_frequency / 1000;
 	usec_t last_poll_time;
 	usec_t difference_in_ms;
+	usec_t now;
 	PgPool *global_writer = get_global_writer(pool);
 
 	log_debug("launch_recheck: for db: %s, global_writer? %s", pool->db->name, global_writer ? global_writer->db->name : "no global_writer");
@@ -193,7 +197,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 	} else if (pool->last_connect_failed) {
 		bool found = false;
 		reset_time_cache();
-		usec_t now = get_cached_time();
+		now = get_cached_time();
 		log_debug("launch_recheck: need to iterate pool list");
 
 		statlist_for_each(item, &pool_list) {
