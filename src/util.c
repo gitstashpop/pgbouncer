@@ -28,6 +28,9 @@
 
 PgPool *get_global_writer(PgPool *pool)
 {
+	if (!pool)
+		return NULL;
+
 	if (pool->global_writer)
 		return pool->global_writer;
 
