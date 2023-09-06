@@ -121,6 +121,7 @@ int cf_max_client_conn;
 int cf_default_pool_size;
 usec_t cf_polling_frequency;
 int cf_min_pool_size;
+int cf_recreate_disconnected_pools;
 int cf_res_pool_size;
 usec_t cf_res_pool_timeout;
 int cf_max_db_connections;
@@ -281,6 +282,7 @@ CF_ABS("pool_mode", CF_LOOKUP(pool_mode_map), cf_pool_mode, 0, "session"),
 CF_ABS("query_timeout", CF_TIME_USEC, cf_query_timeout, 0, "0"),
 CF_ABS("query_wait_timeout", CF_TIME_USEC, cf_query_wait_timeout, 0, "120"),
 CF_ABS("cancel_wait_timeout", CF_TIME_USEC, cf_cancel_wait_timeout, 0, "10"),
+CF_ABS("recreate_disconnected_pools", DEFER_OPS, cf_recreate_disconnected_pools, 0, "1"),
 CF_ABS("reserve_pool_size", CF_INT, cf_res_pool_size, 0, "0"),
 CF_ABS("reserve_pool_timeout", CF_TIME_USEC, cf_res_pool_timeout, 0, "5"),
 CF_ABS("resolv_conf", CF_STR, cf_resolv_conf, CF_NO_RELOAD, ""),

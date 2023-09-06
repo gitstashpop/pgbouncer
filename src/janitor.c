@@ -196,6 +196,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 		update_client_pool(client, global_writer);
 	} else if (pool->last_connect_failed) {
 		bool found = false;
+		bool need_to_reconnect = true;
 		reset_time_cache();
 		now = get_cached_time();
 		log_debug("launch_recheck: need to iterate pool list");
@@ -212,6 +213,8 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 				log_debug("launch_recheck: last_connect_failed, skipping: %s", next_pool->db->name);
 				continue;
 			}
+
+			need_to_reconnect = false;
 
 			if (next_pool->recently_checked) {
 				log_debug("launch_recheck: pool was recently checked, skipping: %s", next_pool->db->name);
@@ -236,7 +239,21 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 			break;
 		}
 
-		if (!found) {
+		if (need_to_reconnect && cf_recreate_disconnected_pools) {
+			log_debug("launch_recheck: all pools failed, so need to try to reconnect to parents");
+			statlist_for_each(item, &pool_list) {
+				next_pool = container_of(item, PgPool, head);
+
+				if (!next_pool->parent_pool || next_pool->parent_pool != pool) {
+					continue;
+				}
+
+				log_debug("launch_recheck: establishing new connection to pool: %s", next_pool->db->name);
+				launch_new_connection(next_pool, /* evict_if_needed= */ true);
+			}
+
+			return;
+		} else if (!found) {
 			log_debug("could not find alternate server, need to reset all pools");
 			reset_recently_checked();
 			/* drastically reduces switchover/failover time since we don't need to wait to get called again from per_loop_activate() */
@@ -254,8 +271,13 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 		server = first_socket(&client->pool->used_server_list);
 		if (!server) {
 			log_debug("launch_recheck: could not find used_server for pool: %s", client->pool->db->name);
-			client->pool->last_connect_failed = true;
-			return;
+
+			/* if a new connection pool was created because all three nodes in the cluster are down, servers are in the idle list instead of used list */
+			server = first_socket(&client->pool->idle_server_list);
+			if (!server) {
+				client->pool->last_connect_failed = true;
+				return;
+			}
 		}
 		if (server->ready)
 			break;

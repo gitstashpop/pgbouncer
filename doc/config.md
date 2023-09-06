@@ -145,6 +145,14 @@ switchovers. This prevents connection storming downed nodes.
 
 Default: 30
 
+### recreate_disconnected_pools
+
+If enabled, and [topology_query](#topology_query) is set for a pool, connections to the pools
+using the topology_query that have been closed will be automatically recreated during
+a failover.
+
+Default: 1 (enabled)
+
 ### min_pool_size
 
 Add more server connections to pool if below this number.
@@ -1068,6 +1076,13 @@ used.
 Query to be executed after a connection is established, but before
 allowing the connection to be used by any clients. If the query raises errors,
 they are logged but ignored otherwise.
+
+### topology_query
+
+Query to be executed to determine the topology for a multi-node cluster. If set,
+PgBouncer will precreate connection pools to each node in the cluster.
+
+Example: topology_query='select endpoint from rds_tools.show_topology()'
 
 ### pool_mode
 
