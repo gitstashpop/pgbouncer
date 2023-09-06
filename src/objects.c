@@ -861,7 +861,7 @@ bool life_over(PgSocket *server)
 	usec_t last_kill = now - pool->last_lifetime_disconnect;
 
 	// never close the pools when using fast switchovers
-	if (fast_switchover)
+	if (pool->db && pool->db->topology_query)
 		return false;
 
 	if (age < cf_server_lifetime)

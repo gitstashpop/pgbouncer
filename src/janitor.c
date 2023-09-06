@@ -204,27 +204,30 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 			next_pool = container_of(item, PgPool, head);
 
 			if (!next_pool->parent_pool || next_pool->parent_pool != pool) {
+				log_debug("launch_recheck: no parent pool, skipping: %s", next_pool->db->name);
 				continue;
 			}
 
-			if (next_pool->last_connect_failed)
+			if (next_pool->last_connect_failed) {
+				log_debug("launch_recheck: last_connect_failed, skipping: %s", next_pool->db->name);
 				continue;
+			}
 
 			if (next_pool->recently_checked) {
-				log_debug("pool was recently checked, skipping: %s", next_pool->db->name);
+				log_debug("launch_recheck: pool was recently checked, skipping: %s", next_pool->db->name);
 				continue;
 			}
 
 			last_poll_time = next_pool->last_poll_time;
 			difference_in_ms = (now - last_poll_time) / 1000;
-			log_debug("last time checked for pool %s: now: %llu last: %llu, diff: %llu, polling_freq_max: %llu", next_pool->db->name, now, last_poll_time, difference_in_ms, cf_polling_frequency/1000);
+			log_debug("launch_recheck: last time checked for pool %s: now: %llu last: %llu, diff: %llu, polling_freq_max: %llu", next_pool->db->name, now, last_poll_time, difference_in_ms, cf_polling_frequency/1000);
 
 			if (difference_in_ms < polling_freq_in_ms) {
-				log_debug("skipping because it's too soon for pool %s (%llu ms)", next_pool->db->name, difference_in_ms);
+				log_debug("launch_recheck: skipping because it's too soon for pool %s (%llu ms)", next_pool->db->name, difference_in_ms);
 				continue;
 			}
 
-			log_debug("found pool during iteration, setting to: %s", next_pool->db->name);
+			log_debug("launch_recheck: found pool during iteration, setting to: %s", next_pool->db->name);
 
 			found = update_client_pool(client, next_pool);
 			if (!found)
@@ -250,7 +253,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 	while (1) {
 		server = first_socket(&client->pool->used_server_list);
 		if (!server) {
-			// need to reset
+			log_debug("launch_recheck: could not find used_server for pool: %s", client->pool->db->name);
 			client->pool->last_connect_failed = true;
 			return;
 		}
@@ -655,6 +658,7 @@ static void check_unused_servers(PgPool *pool, struct StatList *slist, bool idle
 		} else if (server->state == SV_USED && !server->ready) {
 			disconnect_server(server, true, "SV_USED server got dirty");
 		} else if (cf_server_idle_timeout > 0 && idle > cf_server_idle_timeout
+			   && (!pool->db && !pool->db->topology_query)
 			   && (pool_min_pool_size(pool) == 0 || pool_connected_server_count(pool) > pool_min_pool_size(pool))) {
 			disconnect_server(server, true, "server idle timeout");
 		} else if (age >= cf_server_lifetime) {
