@@ -61,12 +61,20 @@ static char *cstr_unquote_value(char *p)
 	while (1) {
 		if (!*p)
 			return NULL;
+		/* Support escaping single quotes */
+		if (p[0] == '\\') {
+			if (p[1] == '\'') {
+				p++;
+				goto increment;
+			}
+		}
 		if (p[0] == '\'') {
 			if (p[1] == '\'')
 				p++;
 			else
 				break;
 		}
+increment:
 		*s++ = *p++;
 	}
 	/* terminate actual value */
