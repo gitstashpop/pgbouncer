@@ -237,8 +237,8 @@ static bool handle_server_startup(PgSocket *server, PktHdr *pkt)
 			break;
 		}
 
-		if (server->pool->db->topology_query && server->pool->initial_writer_endpoint && server->pool->num_nodes < 3) {
-			fatal("topology_query did not find at least 3 nodes to use DB: '%s'. Is the topology table populated with entries?", server->pool->db->name);
+		if (server->pool->db->topology_query && server->pool->initial_writer_endpoint && server->pool->num_nodes < 2) {
+			fatal("topology_query did not find at least 2 nodes to use fast switchovers in DB: '%s'. Is the topology table populated with entries?", server->pool->db->name);
 		}
 		server->pool->initial_writer_endpoint = false;
 
