@@ -382,7 +382,16 @@ struct PgPool {
 	bool welcome_msg_ready:1;
 	bool recently_checked:1; // should be set once checking starts. If all pools have this set, they need to be unset so we can loop again.
 	bool initial_writer_endpoint:1; // used to indicate a configured writer when starting PgBouncer. Used for getting the topology of the cluster associated with the writer.
-
+	bool refresh_topology:1; // after a new writer is found, indicate that we need to refresh the topology.
+	/*
+	 * Used to indicate that DataRow, CommandComplete, and ReadyForQuery should be discarded.
+	 * This is for the case where the topology has to be refreshed, but the data should not be
+	 * sent to the client.
+	 * 
+	 * Once the ReadyForQuery is received, all topology data has been discarded and regular
+	 * client server communications can resume.
+	*/
+	bool collect_datarows:1; 
 	uint16_t num_nodes;
 	uint16_t rrcounter;		/* round-robin counter */
 

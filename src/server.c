@@ -338,6 +338,7 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 	SBuf *sbuf = &server->sbuf;
 	PgSocket *client = server->link;
 	bool async_response = false;
+	bool res = false;
 
 	Assert(!server->pool->db->admin);
 
@@ -349,6 +350,15 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 
 	/* pooling decisions will be based on this packet */
 	case 'Z':		/* ReadyForQuery */
+		/*
+		 * Discard topology data without sending to the client is finished. Resume regular
+		 * client/server communication.
+		 */
+		if (fast_switchover && server->pool->db->topology_query && server->pool->collect_datarows) {
+			server->pool->collect_datarows = false;
+			sbuf_prepare_skip(sbuf, pkt->len);
+			return true;
+		}
 
 		/* if partial pkt, wait */
 		if (!mbuf_get_char(&pkt->data, &state))
@@ -406,6 +416,13 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 		}
 		/* fallthrough */
 	case 'C':		/* CommandComplete */
+		/*
+		 * In the process of discarding topology data without sending to the client.
+		 */
+		if (server->pool->collect_datarows) {
+			sbuf_prepare_skip(sbuf, pkt->len);
+			return true;
+		}
 
 		/* ErrorResponse and CommandComplete show end of copy mode */
 		if (server->copy_mode) {
@@ -446,7 +463,13 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 	/* data packets, there will be more coming */
 	case 'd':		/* CopyData(F/B) */
 	case 'D':		/* DataRow */
-		if (fast_switchover && checking_for_new_writer && server->state != SV_TESTED) {
+		/*
+		 * These are the rows returned from the topology query that are discarded.
+		 */
+		if (server->pool->collect_datarows) {
+			sbuf_prepare_skip(sbuf, pkt->len);
+			return true;
+		} else if (fast_switchover && checking_for_new_writer && server->state != SV_TESTED) {
 			char *data = query_data(pkt);
 			if (strcmp(data, "f") == 0) {
 				log_debug("handle_server_work: connected to writer (pg_is_in_recovery is '%s'): db_name %s", data, server->pool->db->name);
@@ -455,6 +478,8 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 					server->pool->parent_pool = server->pool;
 				}
 				server->pool->parent_pool->global_writer = server->pool;
+				// new writer has been found, so indicate that we need to refresh the topology.
+				server->pool->refresh_topology = true;
 			} else {
 				log_debug("handle_server_work: connected to reader (pg_is_in_recovery is '%s'). db_name: %s, Must keep polling until next server.", data, server->pool->db->name);
 			}
@@ -526,6 +551,19 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 				     "got packet '%c' from server when not linked",
 				     pkt_desc(pkt));
 		sbuf_prepare_skip(sbuf, pkt->len);
+	}
+
+	/*
+	 * pg_is_in_recovery() finished since we received a ReadyForQuery and refresh_topology is set.
+	 * Mark the pool as needing to collect data rows and send the topology query to the writer.
+	 */
+	if (server->pool->refresh_topology && pkt->type == 'Z') {
+		server->pool->collect_datarows = true;
+		server->pool->refresh_topology = false;
+
+		SEND_generic(res, server, 'Q', "s", server->pool->db->topology_query);
+		if (!res)
+			disconnect_server(server, false, "exec_on_connect query failed");
 	}
 
 	return true;
