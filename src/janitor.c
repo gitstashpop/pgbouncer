@@ -25,7 +25,6 @@
 #include <usual/slab.h>
 
 bool fast_switchover = false;
-bool checking_for_new_writer = false;
 
 /* do full maintenance 3x per second */
 static struct timeval full_maint_period = {0, USEC / 3};
@@ -184,11 +183,6 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 
 	log_debug("launch_recheck: for db: %s, global_writer? %s", pool->db->name, global_writer ? global_writer->db->name : "no global_writer");
 
-	if (checking_for_new_writer) {
-		log_debug("launch_recheck: checking_for_new_writer is true so a node is being checked if it is a writer already, skipping");
-		return;
-	}
-
 	if (!pool->db->topology_query) {
 		log_debug("launch_recheck: no topology_query for this pool, so proceeding without cache");
 	} else if (global_writer) {
@@ -215,6 +209,11 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 			}
 
 			need_to_reconnect = false;
+
+			if (next_pool->checking_for_new_writer) {
+				log_debug("launch_recheck: checking_for_new_writer is true for node '%s', can't run another recovery check until done.", next_pool->db->name);
+				return;
+			}
 
 			if (next_pool->recently_checked) {
 				log_debug("launch_recheck: pool was recently checked, skipping: %s", next_pool->db->name);
@@ -295,7 +294,7 @@ static void launch_recheck(PgPool *pool, PgSocket *client)
 
 	if (need_check) {
 		if (fast_switchover && pool->db->topology_query && !global_writer) {
-			checking_for_new_writer = true;
+			client->pool->checking_for_new_writer = true;
 			q = strdup("select pg_is_in_recovery()");
 			if (q == NULL) {
 				log_error("strdup: no mem for pg_is_in_recovery()");

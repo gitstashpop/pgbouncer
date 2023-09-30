@@ -392,6 +392,8 @@ struct PgPool {
 	 * client server communications can resume.
 	*/
 	bool collect_datarows:1; 
+	bool checking_for_new_writer:1; // this is linked with server and client so we can communicate when polling is truly done. Used to only allow checking for one node a time.
+
 	uint16_t num_nodes;
 	uint16_t rrcounter;		/* round-robin counter */
 

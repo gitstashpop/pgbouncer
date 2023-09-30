@@ -469,7 +469,7 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 		if (server->pool->collect_datarows) {
 			sbuf_prepare_skip(sbuf, pkt->len);
 			return true;
-		} else if (fast_switchover && checking_for_new_writer && server->state != SV_TESTED) {
+		} else if (fast_switchover && server->pool->checking_for_new_writer && server->state != SV_TESTED) {
 			char *data = query_data(pkt);
 			if (strcmp(data, "f") == 0) {
 				log_debug("handle_server_work: connected to writer (pg_is_in_recovery is '%s'): db_name %s", data, server->pool->db->name);
@@ -483,7 +483,7 @@ static bool handle_server_work(PgSocket *server, PktHdr *pkt)
 			} else {
 				log_debug("handle_server_work: connected to reader (pg_is_in_recovery is '%s'). db_name: %s, Must keep polling until next server.", data, server->pool->db->name);
 			}
-			checking_for_new_writer = false;
+			server->pool->checking_for_new_writer = false;
 			free(data);
 		}
 	case 't':		/* ParameterDescription */
@@ -702,8 +702,8 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 			if (fast_switchover) {
 				pool->last_failed_time = get_cached_time();
 				pool->last_connect_failed = true;
+				server->pool->checking_for_new_writer = false;
 			}
-			checking_for_new_writer = false;
 			disconnect_server(server, false, "server conn crashed?");
 		}
 		break;
@@ -747,8 +747,7 @@ bool server_proto(SBuf *sbuf, SBufEvent evtype, struct MBuf *data)
 		Assert(server->state == SV_LOGIN);
 		if (fast_switchover) {
 			pool->last_failed_time = get_cached_time();
-
-			checking_for_new_writer = false;
+			server->pool->checking_for_new_writer = false;
 		}
 		disconnect_server(server, false, "connect failed");
 		break;
