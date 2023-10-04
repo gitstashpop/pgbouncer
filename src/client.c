@@ -798,7 +798,7 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
 			return false;
 		}
 
-		if (client->pool && !client->wait_for_user_conn && !client->wait_for_user) {
+		if (client->pool && !client->wait_for_user_conn && !client->wait_for_user && !get_global_writer(client->pool)) {
 			disconnect_client(client, true, "client re-sent startup pkt");
 			return false;
 		}
